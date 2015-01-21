@@ -1,25 +1,41 @@
-image: go1.2
+image: go1.3
+git:
+  path: github.com/drone/drone
 env:
   - GOROOT=/usr/local/go
-  - GOPATH=/var/cache/drone
-  - PATH=$GOPATH/bin:$GOPATH/bin:$PATH
+  - PATH=$PATH:$GOROOT/bin:$GOPATH/bin
 script:
-  - sudo apt-get -y install libsqlite3-dev sqlite3 mercurial bzr 1> /dev/null 2> /dev/null
+  - sudo apt-get -y install zip libsqlite3-dev sqlite3 rpm 1> /dev/null 2> /dev/null
+  - gem install fpm
+  - rbenv rehash
   - make deps
-  - make
   - make test
-  - make dpkg
+  - make test_postgres
+  - make test_mysql
+  - make packages
+services:
+  - postgres
+  - mysql
 notify:
   email:
     recipients:
       - brad@drone.io
+  gitter:
+    room_id: $$GITTER_ROOM
+    token: $$GITTER_KEY
+    on_started: false
+    on_success: true
+    on_failure: true
 
 publish:
   s3:
     acl: public-read
     region: us-east-1
     bucket: downloads.drone.io
-    access_key: $AWS_KEY
-    secret_key: $AWS_SECRET
-    source: deb/drone.deb
-    target: latest/
+    access_key: $$AWS_KEY
+    secret_key: $$AWS_SECRET
+    source: packaging/output/
+    target: $DRONE_BRANCH/
+    recursive: true
+    when:
+      owner: drone
