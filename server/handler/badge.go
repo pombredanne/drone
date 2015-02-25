@@ -113,12 +113,14 @@ func GetCC(c web.C, w http.ResponseWriter, r *http.Request) {
 		name  = c.URLParams["name"]
 	)
 
+	w.Header().Set("Content-Type", "application/xml")
+
 	repo, err := datastore.GetRepoName(ctx, host, owner, name)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	commits, err := datastore.GetCommitList(ctx, repo)
+	commits, err := datastore.GetCommitList(ctx, repo, 1, 0)
 	if err != nil || len(commits) == 0 {
 		w.WriteHeader(http.StatusNotFound)
 		return

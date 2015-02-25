@@ -1,8 +1,10 @@
 'use strict';
 
-angular.module('app').controller("RepoController", function($scope, $http, $routeParams, $route, repos, feed, repo) {
+angular.module('app').controller("RepoController", function($scope, $filter, $http, $routeParams, $route, repos, feed, repo) {
 	$scope.repo = repo;
 	$scope.activating = false;
+	$scope.build_filter = 'build_history';
+	$scope.layout = 'grid';
 
 	// subscribes to the global feed to receive
 	// build status updates.
@@ -13,7 +15,20 @@ angular.module('app').controller("RepoController", function($scope, $http, $rout
 			// display a toast message with the
 			// commit details, allowing the user to
 			// reload the page.
-			$scope.msg = item;
+
+			// Try find an existing commit for this SHA. If found, replace it
+			var sha_updated = $scope.commits.some(function(element, index) {
+				if (element.sha == item.commit.sha)
+					$scope.commits[index] = item.commit;
+				return element.sha == item.commit.sha;
+			});
+
+			// Add a build message if the SHA couldn't be found and the new build status is 'Started'
+			if ( ! sha_updated && item.commit.status == 'Started') {
+				// $scope.commits.unshift(item.commit);
+				$scope.msg = item;
+			}
+
 			$scope.$apply();
 		} else {
 			// we trigger a toast (or html5) notification so the
@@ -70,6 +85,34 @@ angular.module('app').controller("RepoController", function($scope, $http, $rout
 	//		});
 	//};
 
+	$scope.setCommitFilter = function(filter) {
+		$scope.build_filter = filter;
+	}
+
+	$scope.setLayout = function(layout) {
+		$scope.layout = layout;
+	}
+
+	$scope.filteredCommits = function() {
+		var filteredCommits;
+		switch ($scope.build_filter) {
+			// Latest commit for each branch (excluding PR branches)
+			case 'branch_summary':
+				filteredCommits = $filter('filter')($scope.commits, { pull_request: '' }, true);
+				filteredCommits = $filter('unique')($scope.commits, 'branch');
+				break;
+			// Latest commit for each PR
+			case 'pull_requests':
+				filteredCommits = $filter('pullRequests')($scope.commits);
+				filteredCommits = $filter('unique')(filteredCommits, 'pull_request');
+				break;
+			// All commits for a full build history
+			default:
+				filteredCommits = $scope.commits;
+		}
+
+		return filteredCommits;
+	}
 });
 
 

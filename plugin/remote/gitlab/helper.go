@@ -1,16 +1,32 @@
 package gitlab
 
 import (
+	"encoding/base32"
 	"fmt"
 	"net/url"
 
+	"code.google.com/p/goauth2/oauth"
 	"github.com/Bugagazavr/go-gitlab-client"
+	"github.com/gorilla/securecookie"
 )
+
+func NewOauthConfig(g *Gitlab, host string) *oauth.Config {
+	return &oauth.Config{
+		ClientId:     g.Client,
+		ClientSecret: g.Secret,
+		Scope:        "api",
+		AuthURL:      fmt.Sprintf("%s/oauth/authorize", g.url),
+		TokenURL:     fmt.Sprintf("%s/oauth/token", g.url),
+		RedirectURL:  fmt.Sprintf("%s/api/auth/%s", host, g.GetKind()),
+	}
+}
 
 // NewClient is a helper function that returns a new GitHub
 // client using the provided OAuth token.
-func NewClient(uri, token string, skipVerify bool) *gogitlab.Gitlab {
-	return gogitlab.NewGitlabCert(uri, "/api/v3", token, skipVerify)
+func NewClient(url, accessToken string, skipVerify bool) *gogitlab.Gitlab {
+	client := gogitlab.NewGitlabCert(url, "/api/v3", accessToken, skipVerify)
+	client.Bearer = true
+	return client
 }
 
 // IsRead is a helper function that returns true if the
@@ -75,4 +91,10 @@ func GetKeyTitle(rawurl string) (string, error) {
 
 func ns(owner, name string) string {
 	return fmt.Sprintf("%s%%2F%s", owner, name)
+}
+
+// GetRandom is a helper function that generates a 32-bit random
+// key, base32 encoded as a string value.
+func GetRandom() string {
+	return base32.StdEncoding.EncodeToString(securecookie.GenerateRandomKey(32))
 }

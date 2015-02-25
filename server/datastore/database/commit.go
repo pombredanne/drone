@@ -1,6 +1,7 @@
 package database
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/drone/drone/shared/model"
@@ -42,9 +43,9 @@ func (db *Commitstore) GetCommitLast(repo *model.Repo, branch string) (*model.Co
 
 // GetCommitList retrieves a list of latest commits
 // from the datastore for the specified repository.
-func (db *Commitstore) GetCommitList(repo *model.Repo) ([]*model.Commit, error) {
+func (db *Commitstore) GetCommitList(repo *model.Repo, limit, offset int) ([]*model.Commit, error) {
 	var commits []*model.Commit
-	var err = meddler.QueryAll(db, &commits, rebind(commitListQuery), repo.ID)
+	var err = meddler.QueryAll(db, &commits, rebind(commitListQuery), repo.ID, limit, offset)
 	return commits, err
 }
 
@@ -58,9 +59,9 @@ func (db *Commitstore) GetCommitListUser(user *model.User) ([]*model.CommitRepo,
 
 // GetCommitListActivity retrieves an ungrouped list of latest commits
 // from the datastore accessible to the specified user.
-func (db *Commitstore) GetCommitListActivity(user *model.User) ([]*model.CommitRepo, error) {
+func (db *Commitstore) GetCommitListActivity(user *model.User, limit, offset int) ([]*model.CommitRepo, error) {
 	var commits []*model.CommitRepo
-	var err = meddler.QueryAll(db, &commits, rebind(commitListActivityQuery), user.ID)
+	var err = meddler.QueryAll(db, &commits, rebind(commitListActivityQuery), user.ID, limit, offset)
 	return commits, err
 }
 
@@ -101,6 +102,20 @@ func (db *Commitstore) DelCommit(commit *model.Commit) error {
 func (db *Commitstore) KillCommits() error {
 	var _, err = db.Exec(rebind(commitKillStmt))
 	return err
+}
+
+// GetBuildNumber retrieves the build number for a commit.
+func (db *Commitstore) GetBuildNumber(commit *model.Commit) (int64, error) {
+	row := db.QueryRow(rebind(commitGetBuildNumberStmt), commit.ID, commit.RepoID)
+	if row == nil {
+		return 0, fmt.Errorf("Unable to get build number for commit %d", commit.ID)
+	}
+	var bn int64
+	err := row.Scan(&bn)
+	if err != nil {
+		return 0, err
+	}
+	return bn, nil
 }
 
 // Commit table name in database.
@@ -145,7 +160,7 @@ WHERE c.repo_id = r.repo_id
   AND r.repo_id = p.repo_id
   AND p.user_id = ?
 ORDER BY c.commit_created DESC
-LIMIT 20
+LIMIT ? OFFSET ?
 `
 
 // SQL query to retrieve the latest Commits across all branches.
@@ -154,7 +169,7 @@ SELECT *
 FROM commits
 WHERE repo_id = ?
 ORDER BY commit_id DESC
-LIMIT 20
+LIMIT ? OFFSET ?
 `
 
 // SQL query to retrieve a Commit by branch and sha.
@@ -193,4 +208,13 @@ LIMIT 1
 const commitKillStmt = `
 UPDATE commits SET commit_status = 'Killed'
 WHERE commit_status IN ('Started', 'Pending');
+`
+
+// SQL statement to retrieve the build number for
+// a commit
+const commitGetBuildNumberStmt = `
+SELECT COUNT(1)
+FROM commits 
+WHERE commit_id <= ? 
+	AND repo_id = ?
 `

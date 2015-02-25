@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/drone/drone/plugin/remote"
 	"github.com/drone/drone/server/datastore"
 	"github.com/drone/drone/server/worker"
 	"github.com/drone/drone/shared/httputil"
@@ -15,13 +16,15 @@ import (
 // GetCommitList accepts a request to retrieve a list
 // of recent commits by Repo, and retur in JSON format.
 //
-//     GET /api/repos/:host/:owner/:name/commits
+//     GET /api/repos/:host/:owner/:name/commits?limit=:limit&offset=:offset
 //
 func GetCommitList(c web.C, w http.ResponseWriter, r *http.Request) {
 	var ctx = context.FromC(c)
 	var repo = ToRepo(c)
+	var limit = ToLimit(r)
+	var offset = ToOffset(r)
 
-	commits, err := datastore.GetCommitList(ctx, repo)
+	commits, err := datastore.GetCommitList(ctx, repo, limit, offset)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		return
@@ -65,7 +68,9 @@ func PostCommit(c web.C, w http.ResponseWriter, r *http.Request) {
 	var (
 		branch = c.URLParams["branch"]
 		hash   = c.URLParams["commit"]
+		host   = c.URLParams["host"]
 		repo   = ToRepo(c)
+		remote = remote.Lookup(host)
 	)
 
 	commit, err := datastore.GetCommitSha(ctx, repo, branch, hash)
@@ -91,6 +96,18 @@ func PostCommit(c web.C, w http.ResponseWriter, r *http.Request) {
 
 	owner, err := datastore.GetUser(ctx, repo.UserID)
 	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	// Request a new token and update
+	user_token, err := remote.GetToken(owner)
+	if user_token != nil {
+		owner.Access = user_token.AccessToken
+		owner.Secret = user_token.RefreshToken
+		owner.TokenExpiry = user_token.Expiry
+		datastore.PutUser(ctx, owner)
+	} else if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}

@@ -536,8 +536,6 @@ func TestWriteBuildScript(t *testing.T) {
 	}
 
 	f := buildfile.New()
-	f.WriteEnv("LANG", "en_US.UTF-8")
-	f.WriteEnv("LANGUAGE", "en_US:en")
 	f.WriteEnv("TERM", "xterm")
 	f.WriteEnv("GOPATH", "/var/cache/drone")
 	f.WriteEnv("SHELL", "/bin/bash")
@@ -549,7 +547,6 @@ func TestWriteBuildScript(t *testing.T) {
 	f.WriteEnv("DRONE_PR", "123")
 	f.WriteEnv("DRONE_BUILD_DIR", "/var/cache/drone/github.com/drone/drone")
 	f.WriteEnv("CI_NAME", "DRONE")
-	f.WriteEnv("CI_BUILD_NUMBER", "e7e046b35")
 	f.WriteEnv("CI_BUILD_URL", "")
 	f.WriteEnv("CI_REMOTE", "git://github.com/drone/drone.git")
 	f.WriteEnv("CI_BRANCH", "master")

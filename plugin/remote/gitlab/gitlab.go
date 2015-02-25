@@ -1,12 +1,18 @@
 package gitlab
 
 import (
+	"crypto/tls"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
+	"time"
 
+	"code.google.com/p/goauth2/oauth"
 	"github.com/Bugagazavr/go-gitlab-client"
+	"github.com/drone/drone/shared/httputil"
 	"github.com/drone/drone/shared/model"
 )
 
@@ -14,34 +20,61 @@ type Gitlab struct {
 	url        string
 	SkipVerify bool
 	Open       bool
+	Client     string
+	Secret     string
 }
 
-func New(url string, skipVerify, open bool) *Gitlab {
+func New(url string, skipVerify, open bool, client, secret string) *Gitlab {
 	return &Gitlab{
 		url:        url,
 		SkipVerify: skipVerify,
 		Open:       open,
+		Client:     client,
+		Secret:     secret,
 	}
 }
 
 // Authorize handles authentication with thrid party remote systems,
 // such as github or bitbucket, and returns user data.
 func (r *Gitlab) Authorize(res http.ResponseWriter, req *http.Request) (*model.Login, error) {
-	var username = req.FormValue("username")
-	var password = req.FormValue("password")
+	host := httputil.GetURL(req)
+	config := NewOauthConfig(r, host)
 
-	var client = NewClient(r.url, "", r.SkipVerify)
-	var session, err = client.GetSession(username, password)
+	var code = req.FormValue("code")
+	var state = req.FormValue("state")
+
+	if len(code) == 0 {
+		var random = GetRandom()
+		httputil.SetCookie(res, req, "gitlab_state", random)
+		http.Redirect(res, req, config.AuthCodeURL(random), http.StatusSeeOther)
+		return nil, nil
+	}
+
+	cookieState := httputil.GetCookie(req, "gitlab_state")
+	httputil.DelCookie(res, req, "gitlab_state")
+	if cookieState != state {
+		return nil, fmt.Errorf("Error matching state in OAuth2 redirect")
+	}
+
+	var trans = &oauth.Transport{Config: config}
+	var token, err = trans.Exchange(code)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Error exchanging token. %s", err)
+	}
+
+	var client = NewClient(r.url, token.AccessToken, r.SkipVerify)
+
+	var user, errr = client.CurrentUser()
+	if errr != nil {
+		return nil, fmt.Errorf("Error retrieving current user. %s", errr)
 	}
 
 	var login = new(model.Login)
-	login.ID = int64(session.Id)
-	login.Access = session.PrivateToken
-	login.Login = session.UserName
-	login.Name = session.Name
-	login.Email = session.Email
+	login.ID = int64(user.Id)
+	login.Access = token.AccessToken
+	login.Secret = token.RefreshToken
+	login.Login = user.Username
+	login.Email = user.Email
 	return login, nil
 }
 
@@ -148,6 +181,41 @@ func (r *Gitlab) Activate(user *model.User, repo *model.Repo, link string) error
 	return client.AddProjectHook(path, link, true, false, true)
 }
 
+// Deactivate removes a repository by removing all the post-commit hooks
+// which are equal to link and removing the SSH deploy key.
+func (r *Gitlab) Deactivate(user *model.User, repo *model.Repo, link string) error {
+	var client = NewClient(r.url, user.Access, r.SkipVerify)
+	var path = ns(repo.Owner, repo.Name)
+
+	keys, err := client.ProjectDeployKeys(path)
+	if err != nil {
+		return err
+	}
+	var pubkey = strings.TrimSpace(repo.PublicKey)
+	for _, k := range keys {
+		if pubkey == strings.TrimSpace(k.Key) {
+			if err := client.RemoveProjectDeployKey(path, strconv.Itoa(k.Id)); err != nil {
+				return err
+			}
+			break
+		}
+	}
+	hooks, err := client.ProjectHooks(path)
+	if err != nil {
+		return err
+	}
+	link += "?owner=" + repo.Owner + "&name=" + repo.Name
+	for _, h := range hooks {
+		if link == h.Url {
+			if err := client.RemoveProjectHook(path, strconv.Itoa(h.Id)); err != nil {
+				return err
+			}
+			break
+		}
+	}
+	return nil
+}
+
 // ParseHook parses the post-commit hook from the Request body
 // and returns the required data in a standard format.
 func (r *Gitlab) ParseHook(req *http.Request) (*model.Hook, error) {
@@ -196,4 +264,34 @@ func (r *Gitlab) ParseHook(req *http.Request) (*model.Hook, error) {
 
 func (r *Gitlab) OpenRegistration() bool {
 	return r.Open
+}
+
+func (r *Gitlab) GetToken(user *model.User) (*model.Token, error) {
+	expiry := time.Unix(user.TokenExpiry, 0)
+	if expiry.Sub(time.Now()) > (60 * time.Second) {
+		return nil, nil
+	}
+
+	t := &oauth.Transport{
+		Config: NewOauthConfig(r, ""),
+		Token: &oauth.Token{
+			AccessToken:  user.Access,
+			RefreshToken: user.Secret,
+			Expiry:       expiry,
+		},
+		Transport: &http.Transport{
+			Proxy:           http.ProxyFromEnvironment,
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: r.SkipVerify},
+		},
+	}
+
+	if err := t.Refresh(); err != nil {
+		return nil, err
+	}
+
+	var token = new(model.Token)
+	token.AccessToken = t.Token.AccessToken
+	token.RefreshToken = t.Token.RefreshToken
+	token.Expiry = t.Token.Expiry.Unix()
+	return token, nil
 }

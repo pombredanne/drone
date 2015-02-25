@@ -140,8 +140,21 @@ func GetOrgRepos(client *github.Client, org string) ([]github.Repository, error)
 // GetOrgs is a helper function that returns a list of
 // all orgs that a user belongs to.
 func GetOrgs(client *github.Client) ([]github.Organization, error) {
-	orgs, _, err := client.Organizations.List("", nil)
-	return orgs, err
+	var orgs []github.Organization
+	var opts = github.ListOptions{}
+	opts.Page = 1
+
+	for opts.Page > 0 {
+		list, resp, err := client.Organizations.List("", &opts)
+		if err != nil {
+			return nil, err
+		}
+		orgs = append(orgs, list...)
+
+		// increment the next page to retrieve
+		opts.Page = resp.NextPage
+	}
+	return orgs, nil
 }
 
 // GetHook is a heper function that retrieves a hook by
@@ -158,6 +171,16 @@ func GetHook(client *github.Client, owner, name, url string) (*github.Hook, erro
 		}
 	}
 	return nil, nil
+}
+
+func DeleteHook(client *github.Client, owner, name, url string) error {
+	hook, err := GetHook(client, owner, name, url)
+	if err != nil {
+		return err
+	}
+
+	_, err = client.Repositories.DeleteHook(owner, name, *hook.ID)
+	return err
 }
 
 // CreateHook is a heper function that creates a post-commit hook
@@ -217,7 +240,18 @@ func GetKeyTitle(rawurl string) (string, error) {
 	return fmt.Sprintf("drone@%s", uri.Host), nil
 }
 
-// CreateKey is a heper function that creates a deploy key
+// DeleteKey is a helper function that deletes a deploy key
+// for the specified repository.
+func DeleteKey(client *github.Client, owner, name, title, key string) error {
+	var k, err = GetKey(client, owner, name, title)
+	if err != nil {
+		return err
+	}
+	_, err = client.Repositories.DeleteKey(owner, name, *k.ID)
+	return err
+}
+
+// CreateKey is a helper function that creates a deploy key
 // for the specified repository.
 func CreateKey(client *github.Client, owner, name, title, key string) (*github.Key, error) {
 	var k = new(github.Key)
@@ -227,7 +261,7 @@ func CreateKey(client *github.Client, owner, name, title, key string) (*github.K
 	return created, err
 }
 
-// CreateUpdateKey is a heper function that creates a deployment key
+// CreateUpdateKey is a helper function that creates a deployment key
 // for the specified repository if it does not already exist, otherwise
 // it updates the existing key
 func CreateUpdateKey(client *github.Client, owner, name, title, key string) (*github.Key, error) {
