@@ -1,17 +1,23 @@
-# This is a Docker image for the Drone CI system.
-# Use the following command to start the container:
-#    docker run -p 127.0.0.1:80:80 -t drone/drone
+# Build the drone executable on a x64 Linux host:
+#
+#     go build --ldflags '-extldflags "-static"' -o drone_static
+#
+#
+# Alternate command for Go 1.4 and older:
+#
+#     go build -a -tags netgo --ldflags '-extldflags "-static"' -o drone_static
+#
+#
+# Build the docker image:
+#
+#     docker build --rm=true -t drone/drone .
 
-FROM google/golang
-ENV DRONE_SERVER_PORT :80
+FROM centurylink/ca-certs
+EXPOSE 8000
 
-ADD . /gopath/src/github.com/drone/drone/
-WORKDIR /gopath/src/github.com/drone/drone
+ENV DATABASE_DRIVER=sqlite3
+ENV DATABASE_CONFIG=/var/lib/drone/drone.sqlite
 
-RUN apt-get update
-RUN apt-get -y install zip libsqlite3-dev sqlite3 1> /dev/null 2> /dev/null
-RUN make docker deps build embed install
+ADD drone_static /drone_static
 
-EXPOSE 80
-VOLUME ["/var/lib/drone"]
-ENTRYPOINT ["/usr/local/bin/droned"]
+ENTRYPOINT ["/drone_static"]

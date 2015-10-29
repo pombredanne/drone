@@ -1,35 +1,25 @@
-image: go1.3
-git:
+clone:
   path: github.com/drone/drone
-env:
-  - GOROOT=/usr/local/go
-  - PATH=$PATH:$GOROOT/bin:$GOPATH/bin
-script:
-  - sudo add-apt-repository ppa:git-core/ppa 1> /dev/null 2> /dev/null
-  - sudo apt-get update 1> /dev/null 2> /dev/null
-  - sudo apt-get update 1> /dev/null 2> /dev/null
-  - sudo apt-get -y install git zip libsqlite3-dev sqlite3 rpm 1> /dev/null 2> /dev/null
-  - gem install fpm
-  - rbenv rehash
-  - make docker
-  - make deps
-  - make test
-  - make test_postgres
-  - make test_mysql
-  - make packages
-services:
-  - postgres
-  - mysql
-notify:
-  email:
-    recipients:
-      - brad@drone.io
-  webhook:
-    urls:
-      - https://webhooks.gitter.im/e/$$GITTER_KEY
-    on_started: false
-    on_success: true
-    on_failure: true
+
+build:
+  image: drone/golang:1.5
+  environment:
+    - GO15VENDOREXPERIMENT=1
+  commands:
+    - make deps gen
+    - make test test_postgres test_mysql
+    - make build build_static deb docs
+
+compose:
+  postgres:
+    image: postgres:9.4.5
+    environment:
+      - POSTGRES_USER=postgres
+  mysql:
+    image: mysql:5.6.27
+    environment:
+      - MYSQL_DATABASE=test
+      - MYSQL_ALLOW_EMPTY_PASSWORD=yes
 
 publish:
   s3:
@@ -38,8 +28,49 @@ publish:
     bucket: downloads.drone.io
     access_key: $$AWS_KEY
     secret_key: $$AWS_SECRET
-    source: packaging/output/
-    target: $DRONE_BRANCH/
-    recursive: true
+    source: contrib/debian/drone.deb
+    target: drone/0.4
     when:
-      owner: drone
+      repo: drone/drone
+
+  # sync the documentation with the s3 bucket
+
+  s3_sync:
+    acl: public-read
+    region: us-east-1
+    bucket: readme.drone.io
+    access_key: $$AWS_KEY
+    secret_key: $$AWS_SECRET
+    source: /drone/tmp/
+    target: /
+    exclude: "*.svg"
+    when:
+      repo: drone/drone
+      branch: master
+
+  s3_sync:
+    acl: public-read
+    region: us-east-1
+    bucket: readme.drone.io
+    access_key: $$AWS_KEY
+    secret_key: $$AWS_SECRET
+    source: /drone/tmp/
+    target: /
+    exclude: "*"
+    include: "**.svg"
+    content_type: "image/svg+xml"
+    when:
+      repo: drone/drone
+      branch: master
+
+  docker:
+    username: drone
+    password: $$DOCKER_PASS
+    email: $$DOCKER_EMAIL
+    repo: drone/drone
+    tag:
+      - "latest" 
+      - "0.4"
+    when:
+      repo: drone/drone
+      branch: master
